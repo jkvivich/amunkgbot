@@ -405,7 +405,7 @@ async def send_daily_reminders():
         # 1. Напоминание за день до
         result = await session.execute(
             select(Conference)
-            .where(sa.func.date(Conference.date) == tomorrow.strftime("%Y-%m-%d"))
+            .where(Conference.date == tomorrow.strftime("%Y-%m-%d"))
             .options(joinedload(Conference.applications).joinedload(Application.user))
         )
         conferences = result.scalars().unique().all()
@@ -434,10 +434,10 @@ async def send_daily_reminders():
             except:
                 pass
 
-        # 2. Авто-деактивация и снятие роли на следующий день после конференции
+        # 2. Авто-деактивация конференций
         past_result = await session.execute(
             select(Conference)
-            .where(sa.func.date(Conference.date) == yesterday.strftime("%Y-%m-%d"))
+            .where(Conference.date == yesterday.strftime("%Y-%m-%d"))
             .options(joinedload(Conference.applications).joinedload(Application.user))
         )
         past_confs = past_result.scalars().unique().all()
@@ -449,7 +449,7 @@ async def send_daily_reminders():
             conf.is_active = False
             conf.is_completed = True
 
-            # Снимаем роль Организатора, если конференций больше нет
+            # Снимаем роль Организатора, если больше нет активных конференций
             remaining = await session.scalar(
                 select(func.count(Conference.id)).where(
                     Conference.organizer_id == conf.organizer_id,
@@ -460,7 +460,6 @@ async def send_daily_reminders():
                 organizer = await session.get(User, conf.organizer_id)
                 if organizer:
                     organizer.role = Role.PARTICIPANT.value
-                    await session.commit()
                     try:
                         await bot.send_message(
                             organizer.telegram_id,
