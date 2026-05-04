@@ -2,8 +2,9 @@ from aiogram import Router, types, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.utils.keyboard import InlineKeyboardBuilder
-from aiogram.types import InlineKeyboardButton, BufferedInputFile, FSInputFile
+from aiogram.types import InlineKeyboardButton, FSInputFile
 from sqlalchemy import select
+from sqlalchemy.orm import joinedload
 import os
 import logging
 from utils import safe
@@ -38,7 +39,7 @@ async def list_support_requests(message: types.Message):
     async with AsyncSessionLocal() as session:
         result = await session.execute(
             select(SupportRequest)
-            .options(joinedload(SupportRequest.user))  # нужно добавить joinedload в импорт
+            .options(joinedload(SupportRequest.user))
             .order_by(SupportRequest.id.desc())
         )
         requests = result.scalars().all()
@@ -62,7 +63,7 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
     text = f"<b>Обращение {index + 1} из {len(requests)}</b>\n\n"
     text += f"<b>ID:</b> <code>{req.id}</code>\n"
     text += f"<b>От:</b> {safe(user.full_name or f'ID {user.telegram_id}')}\n"
-    text += f"<b>Дата:</b> {req.created_at.strftime('%d.%m.%Y %H:%M') if hasattr(req, 'created_at') else '—'}\n\n"
+    text += f"<b>Дата:</b> {getattr(req, 'created_at', None).strftime('%d.%m.%Y %H:%M') if getattr(req, 'created_at', None) else '—'}\n\n"
     text += f"<b>Сообщение:</b>\n{req.message}\n\n"
     text += f"<b>Статус:</b> {req.status}\n"
     if req.response:
@@ -88,10 +89,13 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
         if isinstance(target, types.Message):
             await target.answer_photo(photo, caption=text, reply_markup=builder.as_markup())
         else:
-            await target.message.edit_media(
-                media=types.InputMediaPhoto(media=photo, caption=text),
-                reply_markup=builder.as_markup()
-            )
+            try:
+                await target.message.edit_media(
+                    media=types.InputMediaPhoto(media=photo, caption=text),
+                    reply_markup=builder.as_markup()
+                )
+            except:
+                await target.message.edit_text(text, reply_markup=builder.as_markup())
     else:
         if isinstance(target, types.Message):
             await target.answer(text, reply_markup=builder.as_markup())
