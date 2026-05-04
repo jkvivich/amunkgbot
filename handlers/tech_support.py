@@ -17,7 +17,7 @@ router = Router()
 
 logger = logging.getLogger(__name__)
 
-# Пагинация обращений
+# Пагинация для Глав Тех Специалиста
 support_pagination = {}
 
 
@@ -33,7 +33,7 @@ async def is_tech_specialist(user_id: int) -> bool:
 @router.message(Command("support_requests"))
 async def list_support_requests(message: types.Message):
     if not await is_tech_specialist(message.from_user.id):
-        await message.answer("Доступ запрещён. Только для Главного Тех Специалиста.")
+        await message.answer("❌ Доступ запрещён. Только для Главного Тех Специалиста.")
         return
 
     async with AsyncSessionLocal() as session:
@@ -46,12 +46,11 @@ async def list_support_requests(message: types.Message):
 
     if not requests:
         await message.answer(
-            "✅ Очередь обращений пуста.",
+            "✅ Сейчас нет активных обращений.",
             reply_markup=get_main_menu_keyboard("Глав Тех Специалист")
         )
         return
 
-    # Сохраняем пагинацию
     support_pagination[message.from_user.id] = {"requests": requests, "index": 0}
     await show_support_request(message, requests, 0)
 
@@ -63,7 +62,7 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
     text = f"<b>Обращение {index + 1} из {len(requests)}</b>\n\n"
     text += f"<b>ID:</b> <code>{req.id}</code>\n"
     text += f"<b>От:</b> {safe(user.full_name or f'ID {user.telegram_id}')}\n"
-    text += f"<b>Дата:</b> {getattr(req, 'created_at', None).strftime('%d.%m.%Y %H:%M') if getattr(req, 'created_at', None) else '—'}\n\n"
+    text += f"<b>Дата:</b> {req.created_at.strftime('%d.%m.%Y %H:%M') if hasattr(req, 'created_at') and req.created_at else '—'}\n\n"
     text += f"<b>Сообщение:</b>\n{req.message}\n\n"
     text += f"<b>Статус:</b> {req.status}\n"
     if req.response:
@@ -83,7 +82,7 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
     builder.row(InlineKeyboardButton(text="📩 Ответить", callback_data=f"reply_support_{req.id}"))
     builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu"))
 
-    # Если есть скриншот — отправляем как фото
+    # Если есть скриншот — показываем как фото
     if req.screenshot_path and os.path.exists(req.screenshot_path):
         photo = FSInputFile(req.screenshot_path)
         if isinstance(target, types.Message):
@@ -115,7 +114,7 @@ async def navigate_support(callback: types.CallbackQuery):
 
     data = support_pagination.get(user_id)
     if not data or index < 0 or index >= len(data["requests"]):
-        await callback.answer("Сессия истекла. Откройте обращения заново.", show_alert=True)
+        await callback.answer("Сессия истекла. Откройте список заново.", show_alert=True)
         return
 
     data["index"] = index
@@ -170,11 +169,11 @@ async def send_support_response(message: types.Message, state: FSMContext):
                 f"По вашему обращению:\n{safe(req.message)}\n\n"
                 f"<b>Ответ:</b>\n{safe(response_text)}"
             )
-        except:
-            pass
+        except Exception as e:
+            logger.error(f"Не удалось отправить ответ пользователю: {e}")
 
     await message.answer(
-        f"✅ Ответ на обращение #{req_id} отправлен.",
+        f"✅ Ответ на обращение #{req_id} успешно отправлен.",
         reply_markup=get_main_menu_keyboard("Глав Тех Специалист")
     )
     await state.clear()
