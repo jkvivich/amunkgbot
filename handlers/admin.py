@@ -754,7 +754,23 @@ async def appeal_submit(callback: types.CallbackQuery):
 async def back_to_main(callback: types.CallbackQuery):
     db_user = await get_or_create_user(callback.from_user.id)
 
-    # Удаляем текущее сообщение и отправляем новое с Reply клавиатурой
+    try:
+        await callback.message.delete()
+    except:
+        pass
+
+    await callback.message.answer(
+        "Главное меню",
+        reply_markup=get_main_menu_keyboard(db_user.role)
+    )
+
+    await callback.answer()
+
+
+@router.callback_query(F.data == "back_to_menu")
+async def back_to_menu(callback: types.CallbackQuery):
+    db_user = await get_or_create_user(callback.from_user.id)
+
     try:
         await callback.message.delete()
     except:
@@ -1076,18 +1092,18 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
     if req.response:
         text += f"\n<b>Ответ:</b>\n{req.response}"
 
-    builder = InlineKeyboardBuilder()
-    builder.row(InlineKeyboardButton(text="📩 Ответить", callback_data=f"reply_support_{req.id}"))
-    
+ builder = InlineKeyboardBuilder()
+
     nav = []
     if index > 0:
         nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_support_{index-1}"))
     if index < len(requests) - 1:
-        nav.append(InlineKeyboardButton(text="▶ Вперёд", callback_data=f"nav_support_{index+1}"))
+        nav.append(InlineKeyboardButton(text="Вперёд ▶", callback_data=f"nav_support_{index+1}"))
     if nav:
         builder.row(*nav)
-    
-    builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu"))
+
+    builder.row(InlineKeyboardButton(text="📩 Ответить", callback_data=f"reply_support_{req.id}"))
+    builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_main"))
 
     has_photo = bool(req.screenshot_path and os.path.exists(req.screenshot_path))
 
