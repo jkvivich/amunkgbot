@@ -1050,10 +1050,9 @@ async def view_support_requests(message: types.Message):
         requests = result.scalars().all()
 
     if not requests:
-        await message.answer("✅ Нет обращений в техподдержку.")
+        await message.answer("✅ На данный момент обращений нет.")
         return
 
-    # Сохраняем пагинацию
     support_pagination[message.from_user.id] = {
         "requests": requests,
         "index": 0
@@ -1062,87 +1061,94 @@ async def view_support_requests(message: types.Message):
     await show_support_request(message, requests, 0)
 
 
-async def show_support_request(target: types.Message | types.CallbackQuery, enriched_requests: list, index: int):
-    item = enriched_requests[index]
-    req = item["request"] if isinstance(item, dict) else item
-    user = item["user"] if isinstance(item, dict) else req.user  # на случай если joinedload сработал
+async def show_support_request(target: types.Message | types.CallbackQuery, requests: list, index: int):
+    req = requests[index]
+    user = req.user
 
     user_name = user.full_name or f"ID {user.telegram_id}" if user else f"ID {req.user_id}"
 
-    text = f"<b>Обращение {index + 1} из {len(enriched_requests)}</b>\n\n"
+    text = f"<b>Обращение {index + 1} из {len(requests)}</b>\n\n"
     text += f"<b>ID:</b> <code>{req.id}</code>\n"
     text += f"<b>От:</b> {safe(user_name)}\n"
-    text += f"<b>Дата:</b> {req.created_at.strftime('%d.%m.%Y %H:%M') if hasattr(req, 'created_at') else '—'}\n\n"
-    text += f"<b>Сообщение:</b>\n{req.message}\n\n"
+    text += f"<b>Дата:</b> {req.created_at.strftime('%d.%m.%Y %H:%M') if hasattr(req, 'created_at') and req.created_at else '—'}\n\n"
+    text += f"<b>Текст обращения:</b>\n{req.message}\n\n"
     text += f"<b>Статус:</b> {req.status}\n"
     if req.response:
-        text += f"<b>Ответ:</b>\n{req.response}"
+        text += f"\n<b>Ответ:</b>\n{req.response}"
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📩 Ответить", callback_data=f"reply_support_{req.id}"))
     
-    # Навигация
     nav = []
     if index > 0:
         nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_support_{index-1}"))
-    if index < len(enriched_requests) - 1:
-        nav.append(InlineKeyboardButton(text="Вперёд ▶", callback_data=f"nav_support_{index+1}"))
+    if index < len(requests) - 1:
+        nav.append(InlineKeyboardButton(text="▶ Вперёд", callback_data=f"nav_support_{index+1}"))
     if nav:
         builder.row(*nav)
-
+    
     builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu"))
 
-    has_photo = req.screenshot_path and os.path.exists(req.screenshot_path)
+    has_photo = bool(req.screenshot_path and os.path.exists(req.screenshot_path))
 
-    # Отправка/редактирование сообщения
+    # Если это первое сообщение (Message)
     if isinstance(target, types.Message):
         if has_photo:
             photo = FSInputFile(req.screenshot_path)
             await target.answer_photo(photo, caption=text, reply_markup=builder.as_markup())
         else:
             await target.answer(text, reply_markup=builder.as_markup())
-    else:
-        # CallbackQuery
-        try:
-            if has_photo:
-                photo = FSInputFile(req.screenshot_path)
-                await target.message.edit_media(
-                    media=types.InputMediaPhoto(media=photo, caption=text),
-                    reply_markup=builder.as_markup()
-                )
-            else:
-                await target.message.edit_text(text, reply_markup=builder.as_markup())
-        except TelegramBadRequest:
-            # Если тип сообщения не совпадает (было фото, стало текст и наоборот)
-            await target.message.delete()
-            if has_photo:
-                photo = FSInputFile(req.screenshot_path)
-                await target.bot.send_photo(
-                    target.message.chat.id, 
-                    photo, 
-                    caption=text, 
-                    reply_markup=builder.as_markup()
-                )
-            else:
-                await target.bot.send_message(
-                    target.message.chat.id, 
-                    text, 
-                    reply_markup=builder.as_markup()
-                )
+        return
+
+    # Если это навигация (CallbackQuery)
+    message_obj = target.message
+    try:
+        if has_photo:
+            photo = FSInputFile(req.screenshot_path)
+            await message_obj.edit_media(
+                media=types.InputMediaPhoto(media=photo, caption=text),
+                reply_markup=builder.as_markup()
+            )
+        else:
+            await message_obj.edit_text(text, reply_markup=builder.as_markup())
+    except TelegramBadRequest as e:
+        # Если Telegram не может отредактировать (например, было фото, а теперь текст)
+        if "message is not modified" not in str(e).lower():
+            try:
+                await message_obj.delete()
+                if has_photo:
+                    photo = FSInputFile(req.screenshot_path)
+                    await target.bot.send_photo(
+                        message_obj.chat.id, 
+                        photo, 
+                        caption=text, 
+                        reply_markup=builder.as_markup()
+                    )
+                else:
+                    await target.bot.send_message(
+                        message_obj.chat.id, 
+                        text, 
+                        reply_markup=builder.as_markup()
+                    )
+            except:
+                await target.answer("Не удалось обновить сообщение", show_alert=True)
+    except Exception:
+        await target.answer("Ошибка при обновлении сообщения", show_alert=True)
 
 
 @router.callback_query(F.data.startswith("nav_support_"))
 async def navigate_support(callback: types.CallbackQuery):
-    index = int(callback.data.split("_")[-1])
-    user_id = callback.from_user.id
-
-    data = support_pagination.get(user_id)
-    if not data:
-        await callback.answer("Сессия истекла. Откройте обращения заново.", show_alert=True)
+    try:
+        index = int(callback.data.split("_")[-1])
+    except:
+        await callback.answer("Ошибка", show_alert=True)
         return
 
-    if index < 0 or index >= len(data["requests"]):
-        await callback.answer("Конец списка.", show_alert=True)
+    user_id = callback.from_user.id
+    data = support_pagination.get(user_id)
+
+    if not data or index < 0 or index >= len(data["requests"]):
+        await callback.answer("Сессия истекла или конец списка.\nОткройте обращения заново.", show_alert=True)
         return
 
     data["index"] = index
