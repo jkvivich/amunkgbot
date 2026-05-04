@@ -31,7 +31,7 @@ from database import (
     get_bot_status,
     set_bot_paused,
     SupportRequest,
-    AdminActionLog   # ← добавь эту строку
+    AdminActionLog
 )
 from sqlalchemy.orm import joinedload
 from database import ConferenceRating
@@ -39,22 +39,20 @@ from database import ConferenceRating
 from keyboards import get_main_menu_keyboard, get_cancel_keyboard
 from config import CHIEF_ADMIN_IDS, TECH_SPECIALIST_ID
 
-# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
-from states import BanReasonState   # ← ЭТУ СТРОКУ ДОБАВЬ
-# ←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←←
+from states import BanReasonState
 
 router = Router()
 
 # States для админских действий
 class AdminStates(StatesGroup):
     delete_conf_reason = State()
-    waiting_support_reply = State()  # ← Новое состояние для ответа на обращение
+    waiting_support_reply = State()
 
 # Пагинация для обращений
 edit_pagination = {}
 support_pagination = {}
 create_pagination = {}
-all_conferences_pagination = {}   # ← добавь сюда
+all_conferences_pagination = {}
 
 # Проверки ролей
 async def is_admin_or_chief(user_id: int) -> bool:
@@ -87,7 +85,7 @@ async def can_pause_bot(user_id: int) -> bool:
 async def can_view_conferences(user_id: int) -> bool:
     return await is_admin_or_chief(user_id) or await is_chief_tech(user_id)
 
-# Универсальная функция обновления списка всех заявок (создание + редактирование + апелляции)
+# Универсальная функция обновления списка всех заявок
 async def update_requests_message(event: types.Message | types.CallbackQuery):
     async with AsyncSessionLocal() as session:
         create_requests = (await session.execute(
@@ -282,8 +280,6 @@ async def admin_conference_requests(message: types.Message):
         create_pagination[message.from_user.id] = {"requests": create_requests, "index": 0}
         await show_create_request(message, create_requests, 0)
 
-# Кнопка заявок на редактирование
-
 # Кнопка "Посмотреть апелляции"
 @router.message(F.text == "📥 Посмотреть апелляции")
 async def view_appeals(message: types.Message):
@@ -372,7 +368,6 @@ async def show_conference_page(target: types.Message | types.CallbackQuery, conf
     if await can_delete_conference(target.from_user.id):
         builder.row(InlineKeyboardButton(text="🗑 Удалить конференцию", callback_data=f"admin_delete_conf_{conf.id}"))
 
-    # Кнопки навигации
     nav = []
     if index > 0:
         nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_all_conf_{index - 1}"))
@@ -425,7 +420,6 @@ async def stats(message: types.Message):
         return
 
     async with AsyncSessionLocal() as session:
-        # Основные подсчёты
         total_users = await session.scalar(select(func.count(User.id)))
         banned_users = await session.scalar(select(func.count(User.id)).where(User.is_banned == True))
         active_users = total_users - banned_users
@@ -440,7 +434,6 @@ async def stats(message: types.Message):
 
         total_applications = await session.scalar(select(func.count(Application.id)))
 
-        # Средний рейтинг
         avg_rating = await session.scalar(select(func.avg(ConferenceRating.rating)))
         avg_rating = round(float(avg_rating), 2) if avg_rating else 0.0
 
@@ -448,7 +441,6 @@ async def stats(message: types.Message):
             select(func.count(func.distinct(ConferenceRating.conference_id)))
         )
 
-        # Самая популярная конференция
         popular_conf = await session.execute(
             select(Conference.name, func.count(Application.id).label("app_count"))
             .join(Application, Application.conference_id == Conference.id)
@@ -488,12 +480,10 @@ async def admin_delete_start(callback: types.CallbackQuery, state: FSMContext):
     await state.update_data(conf_id=conf_id)
     await state.set_state(AdminStates.delete_conf_reason)
 
-    # 🔥 Самое надёжное решение: удаляем текущее сообщение (фото или текст)
-    # и отправляем новое чисто текстовое
     try:
         await callback.message.delete()
     except Exception:
-        pass  # если сообщение уже удалено или ошибка — не критично
+        pass
 
     await callback.message.answer(
         f"Введите причину удаления конференции (ID {conf_id}):\n\n"
@@ -554,7 +544,6 @@ async def perform_conference_deletion(target, conf_id: int, reason: str):
         await session.delete(conf)
         await session.commit()
 
-        # Логирование удаления конференции
         await log_admin_action(
             admin_id=target.from_user.id,
             admin_username=target.from_user.username,
@@ -606,7 +595,6 @@ async def process_create_request(callback: types.CallbackQuery):
             session.add(conference)
             await session.commit()
 
-            # Логирование одобрения создания конференции
             await log_admin_action(
                 admin_id=callback.from_user.id,
                 admin_username=callback.from_user.username,
@@ -625,7 +613,6 @@ async def process_create_request(callback: types.CallbackQuery):
             req.status = "rejected"
             await session.commit()
 
-            # Логирование отклонения создания конференции
             await log_admin_action(
                 admin_id=callback.from_user.id,
                 admin_username=callback.from_user.username,
@@ -685,7 +672,6 @@ async def process_edit_request(callback: types.CallbackQuery):
             req.status = "approved"
             await session.commit()
 
-            # Логирование
             await log_admin_action(
                 admin_id=callback.from_user.id,
                 admin_username=callback.from_user.username,
@@ -702,7 +688,6 @@ async def process_edit_request(callback: types.CallbackQuery):
             req.status = "rejected"
             await session.commit()
 
-            # Логирование
             await log_admin_action(
                 admin_id=callback.from_user.id,
                 admin_username=callback.from_user.username,
@@ -820,7 +805,6 @@ async def process_appeal(callback: types.CallbackQuery):
             session.add(conference)
             await session.commit()
 
-            # Логирование одобрения апелляции
             await log_admin_action(
                 admin_id=callback.from_user.id,
                 admin_username=callback.from_user.username,
@@ -837,7 +821,6 @@ async def process_appeal(callback: types.CallbackQuery):
             req.appeal = False
             await session.commit()
 
-            # Логирование отклонения апелляции
             await log_admin_action(
                 admin_id=callback.from_user.id,
                 admin_username=callback.from_user.username,
@@ -860,9 +843,7 @@ async def process_appeal(callback: types.CallbackQuery):
 
     await update_requests_message(callback)
 
-# Экспорт данных бота
-# ====================== ПОЛНОЦЕННЫЙ ЭКСПОРТ ДАННЫХ БОТА ======================
-# ====================== ПОЛНОЦЕННЫЙ ЭКСПОРТ ДАННЫХ БОТА (ТОЛЬКО ДЛЯ ГЛАВ ТЕХ СПЕЦ) ======================
+# ====================== ЭКСПОРТ ДАННЫХ БОТА ======================
 @router.message(F.text == "📤 Экспорт данных бота")
 async def export_bot_data(message: types.Message):
     if message.from_user.id != TECH_SPECIALIST_ID:
@@ -872,7 +853,6 @@ async def export_bot_data(message: types.Message):
     await message.answer("🔄 Подготавливаю полный экспорт данных...\nЭто может занять 5–10 секунд.")
 
     async with AsyncSessionLocal() as session:
-        # 1. Пользователи
         users = (await session.execute(select(User))).scalars().all()
         users_data = []
         for u in users:
@@ -889,7 +869,6 @@ async def export_bot_data(message: types.Message):
                 "Учебное заведение": u.institution or "—"
             })
 
-        # 2. Конференции
         conferences = (await session.execute(select(Conference))).scalars().all()
         confs_data = []
         for c in conferences:
@@ -906,7 +885,6 @@ async def export_bot_data(message: types.Message):
                 "Завершена": "Да" if c.is_completed else "Нет"
             })
 
-        # 3. Заявки
         apps_result = await session.execute(
             select(Application)
             .options(joinedload(Application.user), joinedload(Application.conference))
@@ -925,7 +903,6 @@ async def export_bot_data(message: types.Message):
                 "Причина отклонения": a.reject_reason or "—"
             })
 
-    # Создаём Excel
     filename = f"mun_bot_full_export_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx"
 
     with pd.ExcelWriter(filename, engine="openpyxl") as writer:
@@ -933,7 +910,6 @@ async def export_bot_data(message: types.Message):
         pd.DataFrame(confs_data).to_excel(writer, sheet_name="Conferences", index=False)
         pd.DataFrame(apps_data).to_excel(writer, sheet_name="Applications", index=False)
 
-    # Отправляем файл
     with open(filename, "rb") as f:
         await message.answer_document(
             BufferedInputFile(f.read(), filename=filename),
@@ -944,13 +920,11 @@ async def export_bot_data(message: types.Message):
                     f"Заявок: {len(apps_data)}"
         )
 
-    # Удаляем файл с сервера
     try:
         os.remove(filename)
     except:
         pass
 
-# Назначение роли — только Глав Тех
 # ====================== НАЗНАЧЕНИЕ РОЛИ ======================
 @router.message(Command("set_role"))
 async def set_user_role(message: types.Message):
@@ -973,7 +947,6 @@ async def set_user_role(message: types.Message):
         )
         return
 
-    # Проверка роли
     valid_roles = ["Участник", "Организатор", "Админ", "Главный Админ"]
     if new_role not in valid_roles:
         await message.answer(
@@ -984,7 +957,6 @@ async def set_user_role(message: types.Message):
         return
 
     async with AsyncSessionLocal() as session:
-        # Поиск пользователя
         if target.startswith("@"):
             username = target[1:].strip()
             result = await session.execute(
@@ -1006,7 +978,6 @@ async def set_user_role(message: types.Message):
             await message.answer("❌ Пользователь не найден.")
             return
 
-        # Защита: нельзя менять роль самому себе
         if target_user.telegram_id == message.from_user.id:
             await message.answer("🚫 Вы не можете изменить свою собственную роль.")
             return
@@ -1015,7 +986,6 @@ async def set_user_role(message: types.Message):
         target_user.role = new_role
         await session.commit()
 
-        # Логирование действия
         await log_admin_action(
             admin_id=message.from_user.id,
             admin_username=message.from_user.username,
@@ -1024,7 +994,6 @@ async def set_user_role(message: types.Message):
             details=f"{old_role} → {new_role}"
         )
 
-        # Уведомление пользователя
         try:
             await message.bot.send_message(
                 target_user.telegram_id,
@@ -1045,10 +1014,6 @@ async def set_user_role(message: types.Message):
         parse_mode="HTML"
     )
 
-# === НОВЫЕ ФУНКЦИИ ДЛЯ ТЕХПОДДЕРЖКИ ===
-
-# Просмотр обращений
-# Просмотр обращений — исправленная версия
 # ====================== Обращения пользователей (для Глав Тех Специалиста) ======================
 
 @router.message(F.text == "📩 Обращения пользователей")
@@ -1092,13 +1057,13 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
     if req.response:
         text += f"\n<b>Ответ:</b>\n{req.response}"
 
- builder = InlineKeyboardBuilder()
+    builder = InlineKeyboardBuilder()
 
     nav = []
     if index > 0:
-        nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_support_{index-1}"))
+        nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_support_{index - 1}"))
     if index < len(requests) - 1:
-        nav.append(InlineKeyboardButton(text="Вперёд ▶", callback_data=f"nav_support_{index+1}"))
+        nav.append(InlineKeyboardButton(text="Вперёд ▶", callback_data=f"nav_support_{index + 1}"))
     if nav:
         builder.row(*nav)
 
@@ -1107,7 +1072,6 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
 
     has_photo = bool(req.screenshot_path and os.path.exists(req.screenshot_path))
 
-    # Если это первое сообщение (Message)
     if isinstance(target, types.Message):
         if has_photo:
             photo = FSInputFile(req.screenshot_path)
@@ -1116,7 +1080,6 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
             await target.answer(text, reply_markup=builder.as_markup())
         return
 
-    # Если это навигация (CallbackQuery)
     message_obj = target.message
     try:
         if has_photo:
@@ -1128,22 +1091,21 @@ async def show_support_request(target: types.Message | types.CallbackQuery, requ
         else:
             await message_obj.edit_text(text, reply_markup=builder.as_markup())
     except TelegramBadRequest as e:
-        # Если Telegram не может отредактировать (например, было фото, а теперь текст)
         if "message is not modified" not in str(e).lower():
             try:
                 await message_obj.delete()
                 if has_photo:
                     photo = FSInputFile(req.screenshot_path)
                     await target.bot.send_photo(
-                        message_obj.chat.id, 
-                        photo, 
-                        caption=text, 
+                        message_obj.chat.id,
+                        photo,
+                        caption=text,
                         reply_markup=builder.as_markup()
                     )
                 else:
                     await target.bot.send_message(
-                        message_obj.chat.id, 
-                        text, 
+                        message_obj.chat.id,
+                        text,
                         reply_markup=builder.as_markup()
                     )
             except:
@@ -1187,8 +1149,7 @@ async def start_reply_support(callback: types.CallbackQuery, state: FSMContext):
     )
     await callback.answer()
 
-# Обработка ответа
-# Обработка ответа на обращение (через кнопку "Ответить")
+# Обработка ответа на обращение
 @router.message(StateFilter(AdminStates.waiting_support_reply))
 async def process_support_reply(message: types.Message, state: FSMContext):
     if not await is_chief_tech(message.from_user.id):
@@ -1216,12 +1177,10 @@ async def process_support_reply(message: types.Message, state: FSMContext):
             await state.clear()
             return
 
-        # Обновляем обращение
         req.response = response_text
         req.status = "answered"
         await session.commit()
 
-        # Загружаем пользователя для отправки ответа
         user_result = await session.execute(select(User).where(User.id == req.user_id))
         user = user_result.scalar_one_or_none()
 
@@ -1242,7 +1201,6 @@ async def process_support_reply(message: types.Message, state: FSMContext):
     )
     await state.clear()
 
-# Команда /reply_support
 # Команда /reply_support ID текст
 @router.message(Command("reply_support"))
 async def cmd_reply_support(message: types.Message):
@@ -1395,7 +1353,6 @@ async def approve_edit(callback: types.CallbackQuery):
         organizer = req.organizer
         changes = req.data.get("changes", {})
 
-        # Применяем изменения
         for field, value in changes.items():
             if field in ["qr", "poster"]:
                 field_name = "qr_code_path" if field == "qr" else "poster_path"
@@ -1406,7 +1363,6 @@ async def approve_edit(callback: types.CallbackQuery):
         req.status = "approved"
         await session.commit()
 
-        # === ЛОГИРОВАНИЕ ===
         await log_admin_action(
             admin_id=callback.from_user.id,
             admin_username=callback.from_user.username,
@@ -1423,7 +1379,6 @@ async def approve_edit(callback: types.CallbackQuery):
         except:
             pass
 
-    # === ОБНОВЛЕНИЕ ПАГИНАЦИИ И ПОКАЗ СЛЕДУЮЩЕЙ ЗАЯВКИ ===
     if user_id in edit_pagination:
         data = edit_pagination[user_id]
         data["requests"] = [r for r in data["requests"] if r.id != req_id]
@@ -1468,7 +1423,6 @@ async def reject_edit(callback: types.CallbackQuery):
         req.status = "rejected"
         await session.commit()
 
-        # === ЛОГИРОВАНИЕ ===
         await log_admin_action(
             admin_id=callback.from_user.id,
             admin_username=callback.from_user.username,
@@ -1485,7 +1439,6 @@ async def reject_edit(callback: types.CallbackQuery):
         except:
             pass
 
-    # === ОБНОВЛЕНИЕ ПАГИНАЦИИ ===
     if user_id in edit_pagination:
         data = edit_pagination[user_id]
         data["requests"] = [r for r in data["requests"] if r.id != req_id]
@@ -1528,12 +1481,14 @@ async def show_edit_request(target, requests: list, index: int):
         InlineKeyboardButton(text="❌ Отклонить", callback_data=f"edit_reject_{req.id}")
     )
     nav = []
-    if index > 0: nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_edit_{index-1}"))
-    if index < len(requests)-1: nav.append(InlineKeyboardButton(text="▶ Вперёд", callback_data=f"nav_edit_{index+1}"))
-    if nav: builder.row(*nav)
+    if index > 0:
+        nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_edit_{index-1}"))
+    if index < len(requests) - 1:
+        nav.append(InlineKeyboardButton(text="Вперёд ▶", callback_data=f"nav_edit_{index+1}"))
+    if nav:
+        builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🔙 В меню", callback_data="back_to_menu"))
 
-    # ПОКАЗ ФОТО
     photo_path = None
     if "poster" in changes and changes["poster"] and os.path.exists(changes["poster"]):
         photo_path = changes["poster"]
@@ -1546,7 +1501,7 @@ async def show_edit_request(target, requests: list, index: int):
             await target.answer_photo(photo, caption=text, reply_markup=builder.as_markup())
         else:
             await target.message.edit_media(
-                media=types.InputMediaPhoto(media=photo, caption=text),  # ← ДОБАВИЛИ media=
+                media=types.InputMediaPhoto(media=photo, caption=text),
                 reply_markup=builder.as_markup()
             )
     else:
@@ -1577,7 +1532,6 @@ async def navigate_edit(callback: types.CallbackQuery):
 async def show_create_request(target, requests: list, index: int):
     req = requests[index]
 
-    # ← ИСПРАВЛЕНИЕ ЗДЕСЬ
     async with AsyncSessionLocal() as session:
         user = await session.get(User, req.user_id)
 
@@ -1586,13 +1540,11 @@ async def show_create_request(target, requests: list, index: int):
     text = f"<b>Заявка на создание {index + 1} из {len(requests)}</b>\n\n"
     text += f"ID: <code>{req.id}</code>\nОт: {user.full_name or user.telegram_id}\n\n"
     text += f"<b>Название:</b> {data.get('name')}\n"
-
-    # ← ЭТУ СТРОКУ ДОБАВИЛИ
     text += f"<b>Описание:</b>\n{data.get('description', '—')}\n\n"
-
     text += f"<b>Город:</b> {data.get('city', 'Онлайн')}\n"
     text += f"<b>Дата:</b> {data.get('date')}\n"
     text += f"<b>Орг взнос:</b> {int(data.get('fee', 0))} сом"
+
     builder = InlineKeyboardBuilder()
     builder.row(
         InlineKeyboardButton(text="✅ Одобрить", callback_data=f"conf_create_approve_{req.id}"),
@@ -1602,7 +1554,7 @@ async def show_create_request(target, requests: list, index: int):
     if index > 0:
         nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_create_{index-1}"))
     if index < len(requests) - 1:
-        nav.append(InlineKeyboardButton(text="▶ Вперёд", callback_data=f"nav_create_{index+1}"))
+        nav.append(InlineKeyboardButton(text="Вперёд ▶", callback_data=f"nav_create_{index+1}"))
     if nav:
         builder.row(*nav)
     builder.row(InlineKeyboardButton(text="🔙 В меню", callback_data="back_to_menu"))
@@ -1613,7 +1565,7 @@ async def show_create_request(target, requests: list, index: int):
             await target.answer_photo(photo, caption=text, reply_markup=builder.as_markup())
         else:
             await target.message.edit_media(
-                media=types.InputMediaPhoto(media=photo, caption=text),  # ← ДОБАВИЛИ media=
+                media=types.InputMediaPhoto(media=photo, caption=text),
                 reply_markup=builder.as_markup()
             )
     else:
@@ -1638,7 +1590,6 @@ async def navigate_create(callback: types.CallbackQuery):
 async def all_users_list(message: types.Message):
     user_id = message.from_user.id
 
-    # Доступ для обычных админов, главных админов и глав тех спеца
     if user_id not in CHIEF_ADMIN_IDS and user_id != TECH_SPECIALIST_ID:
         async with AsyncSessionLocal() as session:
             result = await session.execute(
@@ -1665,7 +1616,7 @@ async def show_all_users(message: types.Message, users: list, page: int = 0):
         await message.answer("👥 Пользователей пока нет.")
         return
 
-    ITEMS_PER_PAGE = 5   # ← Изменили на 5
+    ITEMS_PER_PAGE = 5
     total_pages = (len(users) - 1) // ITEMS_PER_PAGE + 1
     start = page * ITEMS_PER_PAGE
     end = start + ITEMS_PER_PAGE
@@ -1676,7 +1627,6 @@ async def show_all_users(message: types.Message, users: list, page: int = 0):
     builder = InlineKeyboardBuilder()
 
     for i, user in enumerate(users[start:end]):
-        # Скрываем Глав Тех Специалиста и Глав Админов от обычных админов
         if (user.telegram_id == TECH_SPECIALIST_ID or user.telegram_id in CHIEF_ADMIN_IDS):
             if message.from_user.id != TECH_SPECIALIST_ID and message.from_user.id not in CHIEF_ADMIN_IDS:
                 continue
@@ -1701,7 +1651,6 @@ async def show_all_users(message: types.Message, users: list, page: int = 0):
             f"{'─' * 30}\n\n"
         )
 
-        # Кнопки действий для каждого пользователя
         if user.is_banned:
             builder.button(text=f"✅ Разбанить {user.telegram_id}", callback_data=f"unban_user_{user.telegram_id}")
         else:
@@ -1714,15 +1663,12 @@ async def show_all_users(message: types.Message, users: list, page: int = 0):
 
     text += f"\nСтраница <b>{page + 1}</b> из <b>{total_pages}</b>"
 
-    # Навигация по страницам
     if page > 0:
         builder.button(text="⬅️ Назад", callback_data=f"all_users_page_{page-1}")
     if page < total_pages - 1:
         builder.button(text="Вперёд ➡️", callback_data=f"all_users_page_{page+1}")
 
     builder.button(text="🏠 Главное меню", callback_data="back_to_main")
-
-    # Кнопки действий по одной в ряд
     builder.adjust(1)
 
     await message.answer(text, reply_markup=builder.as_markup(), parse_mode="HTML")
@@ -1743,7 +1689,7 @@ async def navigate_all_users(callback: types.CallbackQuery):
     await callback.answer()
 
 
-# ====================== ОБРАБОТКА КНОПОК БАН/РАЗБАН ИЗ СПИСКА ПОЛЬЗОВАТЕЛЕЙ ======================
+# ====================== ОБРАБОТКА КНОПОК БАН/РАЗБАН ======================
 
 @router.callback_query(F.data.startswith("ban_user_"))
 async def ban_from_users_list(callback: types.CallbackQuery, state: FSMContext):
@@ -1753,7 +1699,6 @@ async def ban_from_users_list(callback: types.CallbackQuery, state: FSMContext):
 
     target_id = int(callback.data.split("_")[-1])
 
-    # Запрет банить самого себя
     if target_id == callback.from_user.id:
         await callback.answer("❌ Вы не можете забанить самого себя!", show_alert=True)
         return
@@ -1777,7 +1722,6 @@ async def unban_from_users_list(callback: types.CallbackQuery, state: FSMContext
 
     target_id = int(callback.data.split("_")[-1])
 
-    # Запрет разбанивать самого себя
     if target_id == callback.from_user.id:
         await callback.answer("❌ Вы не можете разбанить самого себя!", show_alert=True)
         return
@@ -1792,7 +1736,7 @@ async def unban_from_users_list(callback: types.CallbackQuery, state: FSMContext
     )
     await callback.answer()
 
-# ====================== ЛОГИ ДЕЙСТВИЙ АДМИНОВ (только Глав Тех Специалист) ======================
+# ====================== ЛОГИ ДЕЙСТВИЙ АДМИНОВ ======================
 @router.message(F.text == "📜 Логи действий")
 async def show_admin_logs(message: types.Message):
     if message.from_user.id != TECH_SPECIALIST_ID:
