@@ -1033,6 +1033,8 @@ async def set_user_role(message: types.Message):
 
 # Просмотр обращений
 # Просмотр обращений — исправленная версия
+# ====================== Обращения пользователей (для Глав Тех Специалиста) ======================
+
 @router.message(F.text == "📩 Обращения пользователей")
 async def view_support_requests(message: types.Message):
     if not await is_chief_tech(message.from_user.id):
@@ -1041,52 +1043,45 @@ async def view_support_requests(message: types.Message):
 
     async with AsyncSessionLocal() as session:
         result = await session.execute(
-            select(SupportRequest).order_by(SupportRequest.id.desc())
+            select(SupportRequest)
+            .options(joinedload(SupportRequest.user))
+            .order_by(SupportRequest.id.desc())
         )
         requests = result.scalars().all()
 
-        if not requests:
-            await message.answer("Нет обращений в техподдержку.")
-            return
+    if not requests:
+        await message.answer("✅ Нет обращений в техподдержку.")
+        return
 
-        # Загружаем пользователей заранее
-        enriched_requests = []
-        for req in requests:
-            user_result = await session.execute(select(User).where(User.id == req.user_id))
-            user = user_result.scalar_one_or_none()
-            enriched_requests.append({
-                "request": req,
-                "user": user
-            })
+    # Сохраняем пагинацию
+    support_pagination[message.from_user.id] = {
+        "requests": requests,
+        "index": 0
+    }
 
-        support_pagination[message.from_user.id] = {
-            "index": 0,
-            "total": len(enriched_requests),
-            "requests": enriched_requests
-        }
-        await show_support_request(message, enriched_requests, 0)
+    await show_support_request(message, requests, 0)
 
-async def show_support_request(target, enriched_requests: list, index: int):
+
+async def show_support_request(target: types.Message | types.CallbackQuery, enriched_requests: list, index: int):
     item = enriched_requests[index]
-    req = item["request"]
-    user = item["user"]
+    req = item["request"] if isinstance(item, dict) else item
+    user = item["user"] if isinstance(item, dict) else req.user  # на случай если joinedload сработал
 
-    if not user:
-        user_name = f"ID {req.user_id} (пользователь удалён)"
-    else:
-        user_name = user.full_name or f"ID {user.telegram_id}"
+    user_name = user.full_name or f"ID {user.telegram_id}" if user else f"ID {req.user_id}"
 
     text = f"<b>Обращение {index + 1} из {len(enriched_requests)}</b>\n\n"
     text += f"<b>ID:</b> <code>{req.id}</code>\n"
-    text += f"<b>От:</b> {user_name}\n"
-    text += f"<b>Текст:</b>\n{req.message}\n\n"
-    text += f"<b>Статус:</b> {req.status}"
+    text += f"<b>От:</b> {safe(user_name)}\n"
+    text += f"<b>Дата:</b> {req.created_at.strftime('%d.%m.%Y %H:%M') if hasattr(req, 'created_at') else '—'}\n\n"
+    text += f"<b>Сообщение:</b>\n{req.message}\n\n"
+    text += f"<b>Статус:</b> {req.status}\n"
     if req.response:
-        text += f"\n<b>Ответ:</b> {req.response}"
+        text += f"<b>Ответ:</b>\n{req.response}"
 
     builder = InlineKeyboardBuilder()
     builder.row(InlineKeyboardButton(text="📩 Ответить", callback_data=f"reply_support_{req.id}"))
-
+    
+    # Навигация
     nav = []
     if index > 0:
         nav.append(InlineKeyboardButton(text="◀ Назад", callback_data=f"nav_support_{index-1}"))
@@ -1097,44 +1092,45 @@ async def show_support_request(target, enriched_requests: list, index: int):
 
     builder.row(InlineKeyboardButton(text="🔙 Главное меню", callback_data="back_to_menu"))
 
-    keyboard = builder.as_markup()
+    has_photo = req.screenshot_path and os.path.exists(req.screenshot_path)
 
-    has_screenshot = req.screenshot_path and os.path.exists(req.screenshot_path)
-
+    # Отправка/редактирование сообщения
     if isinstance(target, types.Message):
-        # Первое сообщение — отправляем как есть
-        if has_screenshot:
+        if has_photo:
             photo = FSInputFile(req.screenshot_path)
-            await target.answer_photo(photo, caption=text, reply_markup=keyboard)
+            await target.answer_photo(photo, caption=text, reply_markup=builder.as_markup())
         else:
-            await target.answer(text, reply_markup=keyboard)
-        return
-
-    # Это callback — редактируем
-    message = target.message
-
-    try:
-        if has_screenshot:
-            photo = FSInputFile(req.screenshot_path)
-            await message.edit_media(
-                media=types.InputMediaPhoto(media=photo, caption=text),
-                reply_markup=keyboard
-            )
-        else:
-            await message.edit_text(text, reply_markup=keyboard)
-    except TelegramBadRequest as e:
-        if "there is no text in the message to edit" in str(e) or "there is no media in the message" in str(e):
-            # Тип сообщения не совпадает — удаляем старое и отправляем новое
-            await message.delete()
-            if has_screenshot:
+            await target.answer(text, reply_markup=builder.as_markup())
+    else:
+        # CallbackQuery
+        try:
+            if has_photo:
                 photo = FSInputFile(req.screenshot_path)
-                await target.bot.send_photo(message.chat.id, photo, caption=text, reply_markup=keyboard)
+                await target.message.edit_media(
+                    media=types.InputMediaPhoto(media=photo, caption=text),
+                    reply_markup=builder.as_markup()
+                )
             else:
-                await target.bot.send_message(message.chat.id, text, reply_markup=keyboard)
-        else:
-            raise e
+                await target.message.edit_text(text, reply_markup=builder.as_markup())
+        except TelegramBadRequest:
+            # Если тип сообщения не совпадает (было фото, стало текст и наоборот)
+            await target.message.delete()
+            if has_photo:
+                photo = FSInputFile(req.screenshot_path)
+                await target.bot.send_photo(
+                    target.message.chat.id, 
+                    photo, 
+                    caption=text, 
+                    reply_markup=builder.as_markup()
+                )
+            else:
+                await target.bot.send_message(
+                    target.message.chat.id, 
+                    text, 
+                    reply_markup=builder.as_markup()
+                )
 
-# Навигация по обращениям
+
 @router.callback_query(F.data.startswith("nav_support_"))
 async def navigate_support(callback: types.CallbackQuery):
     index = int(callback.data.split("_")[-1])
@@ -1142,17 +1138,16 @@ async def navigate_support(callback: types.CallbackQuery):
 
     data = support_pagination.get(user_id)
     if not data:
-        await callback.answer("🔄 Сессия истекла. Нажмите кнопку заново.", show_alert=True)
+        await callback.answer("Сессия истекла. Откройте обращения заново.", show_alert=True)
         return
 
-    total = len(data["requests"])
-    if index < 0 or index >= total:
+    if index < 0 or index >= len(data["requests"]):
         await callback.answer("Конец списка.", show_alert=True)
         return
 
     data["index"] = index
     await show_support_request(callback, data["requests"], index)
-    await callback.answer(f"{index + 1}/{total}")
+    await callback.answer(f"{index + 1} / {len(data['requests'])}")
 
 # Начало ответа
 @router.callback_query(F.data.startswith("reply_support_"))
