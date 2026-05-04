@@ -545,7 +545,6 @@ async def cleanup_old_backups():
 async def main():
     logging.info("Инициализация базы данных...")
     await init_db()
-    # enable_wal() больше не нужен (только для SQLite)
     logging.info("База готова. Запуск бота...")
 
     asyncio.create_task(reminder_scheduler())
@@ -558,6 +557,5 @@ async def main():
         logging.error(f"КРИТИЧЕСКАЯ ОШИБКА: {e}")
     finally:
         await bot.session.close()
-
 if __name__ == "__main__":
     asyncio.run(main())
