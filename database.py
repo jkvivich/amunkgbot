@@ -17,19 +17,22 @@ from config import TECH_SPECIALIST_ID, CHIEF_ADMIN_IDS
 
 
 # ====================== DATABASE ENGINE ======================
+# ====================== DATABASE ENGINE ======================
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 if DATABASE_URL:
-    # PostgreSQL (для Railway / продакшена)
+    # PostgreSQL + asyncpg (для Railway)
     engine = create_async_engine(
         DATABASE_URL,
         echo=False,
         pool_pre_ping=True,
-        pool_size=15,
+        pool_size=20,
         max_overflow=10,
         pool_timeout=30,
+        # Явно указываем asyncpg
+        connect_args={"server_settings": {"application_name": "mun_bot"}}
     )
-    print("✅ PostgreSQL engine подключён")
+    print("✅ PostgreSQL + asyncpg engine подключён")
 else:
     # SQLite для локальной разработки
     DB_PATH = "mun_bot.db"
