@@ -5,7 +5,7 @@ import os
 import logging
 from enum import StrEnum
 from datetime import datetime
-
+from sqlalchemy.orm import joinedload
 from sqlalchemy import (
     String, Integer, BigInteger, Float, Text, ForeignKey, JSON, select, func, DateTime
 )
